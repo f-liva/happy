@@ -1291,3 +1291,186 @@ describe('ApiSessionClient v3 messages API migration', () => {
         expect(mockAxiosPost).not.toHaveBeenCalled();
     });
 });
+
+describe('provisional session title', () => {
+    let socketHandlers: SocketHandlers;
+    let mockSocket: any;
+    let session: ReturnType<typeof makeSession>;
+    let metadataWrites: any[];
+
+    const emitSocketEvent = (event: string, ...args: any[]) => {
+        const handlers = socketHandlers[event] || [];
+        handlers.forEach((handler) => handler(...args));
+    };
+
+    const sendUserText = (text: string, seq = 1) => {
+        emitSocketEvent('update', createNewMessageUpdate(seq, encryptContent(session, {
+            role: 'user',
+            content: { type: 'text', text }
+        })));
+    };
+
+    const writtenTitles = () => metadataWrites.map((m) => m?.summary?.text);
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mockShouldReconnect.mockReturnValue(true);
+        socketHandlers = {};
+        session = makeSession();
+        metadataWrites = [];
+        mockSocket = {
+            connected: true,
+            connect: vi.fn(),
+            on: vi.fn((event: string, handler: SocketHandler) => {
+                if (!socketHandlers[event]) socketHandlers[event] = [];
+                socketHandlers[event].push(handler);
+            }),
+            off: vi.fn(),
+            emit: vi.fn(),
+            emitWithAck: vi.fn(async (event: string, payload: any) => {
+                if (event !== 'update-metadata') return { result: 'error' };
+                const written = decrypt(
+                    session.encryptionKey,
+                    session.encryptionVariant,
+                    decodeBase64(payload.metadata)
+                );
+                metadataWrites.push(written);
+                return { result: 'success', version: metadataWrites.length, metadata: payload.metadata };
+            }),
+            volatile: { emit: vi.fn() },
+            close: vi.fn()
+        };
+        mockIo.mockReturnValue(mockSocket);
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+    });
+
+    it('names an untitled chat from its very first user message', async () => {
+        const client = new ApiSessionClient('fake-token', session);
+        client.onUserMessage(vi.fn());
+
+        sendUserText('sistema il toggle dei costi economici nel pannello Gymmy');
+
+        await waitForCheck(() => {
+            expect(writtenTitles()).toEqual(['sistema il toggle dei costi economici…']);
+        });
+        await client.close();
+    });
+
+    it('never overwrites a title the model already chose', async () => {
+        session.metadata = { ...session.metadata, summary: { text: 'Titolo scelto dal modello', updatedAt: 1 } } as any;
+        const client = new ApiSessionClient('fake-token', session);
+        client.onUserMessage(vi.fn());
+
+        sendUserText('un secondo messaggio qualsiasi');
+
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        expect(metadataWrites).toHaveLength(0);
+        await client.close();
+    });
+
+    it('titles a resumed session that never got one, then stops writing', async () => {
+        const client = new ApiSessionClient('fake-token', session);
+        client.onUserMessage(vi.fn());
+
+        sendUserText('riprendi il lavoro sul deploy', 1);
+        await waitForCheck(() => {
+            expect(metadataWrites).toHaveLength(1);
+        });
+
+        sendUserText('e adesso continua', 2);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        expect(writtenTitles()).toEqual(['riprendi il lavoro sul deploy']);
+        await client.close();
+    });
+
+    it('names a chat started from the terminal, where the message comes from the local transcript', async () => {
+        const client = new ApiSessionClient('fake-token', session);
+
+        client.sendClaudeSessionMessage({
+            type: 'user',
+            uuid: 'u-1',
+            isSidechain: false,
+            isMeta: false,
+            message: { role: 'user', content: [{ type: 'text', text: 'aggiorna il changelog del rilascio' }] }
+        } as any);
+
+        await waitForCheck(() => {
+            expect(writtenTitles()).toEqual(['aggiorna il changelog del rilascio']);
+        });
+        await client.close();
+    });
+
+    it('does not name a chat after a tool result, which carries no human words', async () => {
+        const client = new ApiSessionClient('fake-token', session);
+
+        client.sendClaudeSessionMessage({
+            type: 'user',
+            uuid: 'u-2',
+            isSidechain: false,
+            isMeta: false,
+            message: {
+                role: 'user',
+                content: [{ type: 'tool_result', tool_use_id: 't-1', content: 'exit code 0' }]
+            }
+        } as any);
+
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        expect(metadataWrites).toHaveLength(0);
+        await client.close();
+    });
+
+    it('does not name a chat after a slash command or a subagent prompt', async () => {
+        const client = new ApiSessionClient('fake-token', session);
+
+        // A slash command is replayed as a user message with isMeta: true — its
+        // body is command markup, not the sentence the human typed.
+        client.sendClaudeSessionMessage({
+            type: 'user',
+            uuid: 'u-meta',
+            isSidechain: false,
+            isMeta: true,
+            message: { role: 'user', content: [{ type: 'text', text: '<command-name>/compact</command-name>' }] }
+        } as any);
+        // A Task subagent's injected prompt is a sidechain, not the user talking.
+        client.sendClaudeSessionMessage({
+            type: 'user',
+            uuid: 'u-side',
+            isSidechain: true,
+            isMeta: false,
+            message: { role: 'user', content: [{ type: 'text', text: 'esplora il repository e riporta' }] }
+        } as any);
+
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        expect(metadataWrites).toHaveLength(0);
+
+        // …and the real first message still gets to name the chat.
+        client.sendClaudeSessionMessage({
+            type: 'user',
+            uuid: 'u-real',
+            isSidechain: false,
+            isMeta: false,
+            message: { role: 'user', content: [{ type: 'text', text: 'pulisci i log del gateway' }] }
+        } as any);
+
+        await waitForCheck(() => {
+            expect(writtenTitles()).toEqual(['pulisci i log del gateway']);
+        });
+        await client.close();
+    });
+
+    it('leaves the chat untitled when the message carries no words', async () => {
+        const client = new ApiSessionClient('fake-token', session);
+        client.onUserMessage(vi.fn());
+
+        sendUserText('   ');
+
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        expect(metadataWrites).toHaveLength(0);
+        await client.close();
+    });
+});
