@@ -2,7 +2,6 @@ import { logger } from '@/ui/logger'
 import { EventEmitter } from 'node:events'
 import { io, Socket } from 'socket.io-client'
 import { AgentState, ClientToServerEvents, FileEventMessage, FileEventMessageSchema, Metadata, ServerToClientEvents, Session, Update, UserMessage, UserMessageSchema, Usage } from './types'
-import { deriveProvisionalTitle } from './sessionTitle'
 import { decodeBase64, decryptBlob, decrypt, encodeBase64, encrypt, encryptBlob } from './encryption';
 import { backoff, delay } from '@/utils/time';
 import { configuration } from '@/configuration';
@@ -195,8 +194,6 @@ export class ApiSessionClient extends EventEmitter {
     private agentStateVersion: number;
     private socket: Socket<ServerToClientEvents, ClientToServerEvents>;
     private pendingMessages: UserMessage[] = [];
-    /** Whether this session already has (or has just been given) a title. */
-    private titleSettled = false;
     private pendingMessageCallback: ((message: UserMessage) => void) | null = null;
     private pendingFileEvents: FileEventMessage[] = [];
     private pendingFileEventCallback: ((data: FileEventMessage) => void) | null = null;
@@ -567,39 +564,9 @@ export class ApiSessionClient extends EventEmitter {
         };
     }
 
-    /**
-     * Give an untitled chat a title derived from its first user message.
-     *
-     * Runs here because this is the ONE place every backend's user messages pass
-     * through (claude, codex, gemini, acp, agy, openclaw all subscribe via
-     * `onUserMessage`), and it covers the resumed-session case for free: a chat
-     * that was never titled gets one at the first message after the resume.
-     *
-     * Two guards, because `updateMetadata` is asynchronous and serialized behind
-     * a lock: the local flag stops a burst of messages from queueing several
-     * writes, and the re-check inside the handler runs with fresh metadata, so a
-     * title the agent set via `change_title` in the meantime is never clobbered.
-     */
-    private ensureProvisionalTitle(text: string) {
-        if (this.titleSettled) return;
-        if (this.metadata?.summary?.text?.trim()) {
-            this.titleSettled = true;
-            return;
-        }
-        const title = deriveProvisionalTitle(text);
-        if (!title) return;
-        this.titleSettled = true;
-        this.updateMetadata((metadata) => (
-            metadata.summary?.text?.trim()
-                ? metadata
-                : { ...metadata, summary: { text: title, updatedAt: Date.now() } }
-        ));
-    }
-
     private routeIncomingMessage(message: unknown) {
         const userResult = UserMessageSchema.safeParse(message);
         if (userResult.success) {
-            this.ensureProvisionalTitle(userResult.data.content.text);
             if (this.pendingMessageCallback) {
                 this.pendingMessageCallback(userResult.data);
             } else {
@@ -739,40 +706,7 @@ export class ApiSessionClient extends EventEmitter {
         }
     }
 
-    /**
-     * The human words of a transcript user message, or '' when there are none.
-     *
-     * A Claude transcript replays TOOL RESULTS as `type: 'user'` too: naming a
-     * chat after one would title it with a command's stdout. Only text blocks
-     * count.
-     */
-    private humanTextOf(body: RawJSONLines): string {
-        if (body.type !== 'user') return '';
-        // Same exclusion `extractLocalTranscriptImageAttachments` makes: a slash
-        // command is replayed as `isMeta` user text (command markup, not a
-        // sentence), and a Task subagent's prompt is a sidechain. Titling the
-        // chat from either names it after something the human never typed — and
-        // the title latches, so the real first message would never get its turn.
-        if (body.isMeta || body.isSidechain) return '';
-        const content = (body as { message?: { content?: unknown } }).message?.content;
-        if (typeof content === 'string') return content;
-        if (!Array.isArray(content)) return '';
-        return content
-            .filter((block): block is { type: 'text'; text: string } =>
-                Boolean(block) && (block as { type?: unknown }).type === 'text'
-                && typeof (block as { text?: unknown }).text === 'string')
-            .map((block) => block.text)
-            .join(' ');
-    }
-
     private applyClaudeSessionMessageSideEffects(body: RawJSONLines) {
-        // A chat started from the terminal never passes through
-        // `routeIncomingMessage` — its messages come from the local transcript —
-        // so the title is derived here too, behind the same guards.
-        if (body.type === 'user') {
-            this.ensureProvisionalTitle(this.humanTextOf(body));
-        }
-
         // Track usage from assistant messages
         if (body.type === 'assistant' && body.message?.usage) {
             try {
