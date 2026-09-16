@@ -719,6 +719,7 @@ ${chalk.bold('Usage:')}
   happy gemini            Start Gemini mode (ACP) [deprecated — use agy]
   happy agy               Start agy (Antigravity CLI) mode
   happy acp               Start a generic ACP-compatible agent
+                            (use "happy acp opencode" for OpenCode)
   happy connect           Connect AI vendor API keys
   happy sandbox           Configure and manage OS-level sandboxing
   happy notify            Send push notification
@@ -737,9 +738,9 @@ ${chalk.bold('Examples:')}
   happy --js-runtime bun   Use bun instead of node to spawn Claude Code
   happy --claude-env ANTHROPIC_BASE_URL=http://127.0.0.1:3456
                            Use a custom API endpoint (e.g., claude-code-router)
-  happy acp gemini         Start Gemini via generic ACP runner
-  happy acp -- opencode --acp
-                           Start a custom ACP command
+  happy acp opencode       Start OpenCode with its configured providers/models
+  happy acp -- custom-agent --stdio
+                           Start a custom ACP-compatible command
   happy acp opencode --verbose
                            Print raw ACP backend/envelope events
   happy auth login --force Authenticate

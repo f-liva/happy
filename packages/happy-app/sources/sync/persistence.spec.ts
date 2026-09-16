@@ -12,7 +12,12 @@ vi.mock('react-native-mmkv', () => ({
     },
 }));
 
-const { loadPendingSettings, savePendingSettings } = await import('./persistence');
+const {
+    loadNewSessionDraft,
+    loadPendingSettings,
+    saveNewSessionDraft,
+    savePendingSettings,
+} = await import('./persistence');
 
 describe('loadPendingSettings', () => {
     beforeEach(() => store.clear());
@@ -47,5 +52,26 @@ describe('loadPendingSettings', () => {
     it('falls back to an empty queue on malformed json', () => {
         store.set('pending-settings', '{not json');
         expect(loadPendingSettings()).toEqual({});
+    });
+});
+
+describe('new session draft', () => {
+    beforeEach(() => store.clear());
+
+    it('restores OpenCode as the selected harness', () => {
+        saveNewSessionDraft({
+            input: 'Inspect this project',
+            selectedMachineId: 'machine-1',
+            selectedPath: '/repo',
+            agentType: 'opencode',
+            permissionMode: null,
+            modelMode: null,
+            effortLevel: null,
+            sessionType: 'simple',
+            worktreeKey: null,
+            updatedAt: 1,
+        });
+
+        expect(loadNewSessionDraft()?.agentType).toBe('opencode');
     });
 });

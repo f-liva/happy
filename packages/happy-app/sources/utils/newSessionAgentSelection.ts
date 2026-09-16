@@ -11,7 +11,8 @@ const DEFAULT_AGENT: NewSessionAgentType = 'claude';
 /**
  * Keep the persisted selection when it is still installed. If it is stale,
  * use the first CLI the selected machine actually reports as available.
- * Older machines without capability metadata retain the persisted selection.
+ * Older machines without capability metadata retain the persisted selection,
+ * except OpenCode, which requires an explicit capability report.
  *
  * A retired harness is always replaced, installed or not: its CLI being
  * present on the machine is exactly the case where a stale draft would
@@ -21,6 +22,14 @@ export function resolveMachineAgent(
     selectedAgent: NewSessionAgentType,
     availability: CliAvailability | null | undefined,
 ): NewSessionAgentType {
+    // OpenCode was added after capability reporting already existed. Never keep
+    // it selected against an old daemon that cannot explicitly confirm support.
+    if (selectedAgent === 'opencode' && availability?.opencode !== true) {
+        return NEW_SESSION_AGENT_ORDER.find((agent) => (
+            agent !== 'opencode' && (!availability || availability[agent])
+        )) ?? DEFAULT_AGENT;
+    }
+
     if (isRetiredHarness(selectedAgent)) {
         return NEW_SESSION_AGENT_ORDER.find((agent) => !availability || availability[agent])
             ?? DEFAULT_AGENT;

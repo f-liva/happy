@@ -7,6 +7,7 @@ import { findAgyBin } from '@/agy/constants';
 export interface CLIAvailability {
   claude: boolean;
   codex: boolean;
+  opencode: boolean;
   gemini: boolean;
   openclaw: boolean;
   agy: boolean;
@@ -38,6 +39,7 @@ function commandExists(command: string): boolean {
 function detectPosix(): CLIAvailability {
   const claude = commandExists('claude');
   const codex = commandExists('codex');
+  const opencode = commandExists('opencode');
   const gemini = commandExists('gemini');
   const agy = findAgyBin() !== undefined;
 
@@ -47,7 +49,7 @@ function detectPosix(): CLIAvailability {
   const openclawEnv = !!process.env.OPENCLAW_GATEWAY_URL;
   const openclaw = openclawCommand || openclawConfig || openclawEnv;
 
-  return { claude, codex, gemini, openclaw, agy, detectedAt: Date.now() };
+  return { claude, codex, opencode, gemini, openclaw, agy, detectedAt: Date.now() };
 }
 
 function detectWindows(): CLIAvailability {
@@ -62,6 +64,7 @@ function detectWindows(): CLIAvailability {
 
   const claude = checkCommand('claude');
   const codex = checkCommand('codex');
+  const opencode = checkCommand('opencode');
   const gemini = checkCommand('gemini');
   const agy = findAgyBin() !== undefined;
 
@@ -71,5 +74,5 @@ function detectWindows(): CLIAvailability {
   const openclawEnv = !!process.env.OPENCLAW_GATEWAY_URL;
   const openclaw = openclawCommand || openclawConfig || openclawEnv;
 
-  return { claude, codex, gemini, openclaw, agy, detectedAt: Date.now() };
+  return { claude, codex, opencode, gemini, openclaw, agy, detectedAt: Date.now() };
 }

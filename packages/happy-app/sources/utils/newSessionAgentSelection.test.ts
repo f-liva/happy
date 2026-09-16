@@ -19,6 +19,22 @@ describe('resolveMachineAgent', () => {
         })).toBe('codex');
     });
 
+    it('selects OpenCode when it is the first installed CLI', () => {
+        expect(resolveMachineAgent('claude', {
+            claude: false,
+            codex: false,
+            opencode: true,
+        })).toBe('opencode');
+    });
+
+    it('does not retain OpenCode without an explicit daemon capability', () => {
+        expect(resolveMachineAgent('opencode', undefined)).toBe('claude');
+        expect(resolveMachineAgent('opencode', {
+            claude: false,
+            codex: true,
+        })).toBe('codex');
+    });
+
     it('selects Rig on a Rig-only machine', () => {
         expect(resolveMachineAgent('claude', {
             rig: true,

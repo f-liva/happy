@@ -143,6 +143,9 @@ export const MachineMetadataSchema = z.object({
   cliAvailability: z.object({
     claude: z.boolean(),
     codex: z.boolean(),
+    // Optional so metadata written by a CLI predating OpenCode detection still
+    // matches this shape. detectCLIAvailability always reports it.
+    opencode: z.boolean().optional(),
     gemini: z.boolean(),
     openclaw: z.boolean(),
     // Optional so metadata written by a CLI predating agy detection still

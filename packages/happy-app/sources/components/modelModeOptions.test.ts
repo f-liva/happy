@@ -19,6 +19,8 @@ import {
     groupModelModesByProvider,
     includeConfiguredModel,
     getOpenClawPermissionModes,
+    getOpenCodeModelModes,
+    getOpenCodePermissionModes,
     mapMetadataOptions,
     resolveCurrentOption,
 } from './modelModeOptions';
@@ -165,6 +167,40 @@ describe('modelModeOptions', () => {
         // resolve to an older model than the row claims.
         expect(models.some((model) => model.key === 'default')).toBe(false);
         expect(models.some((model) => ['opus', 'sonnet', 'fable', 'haiku'].includes(model.key))).toBe(false);
+    });
+
+    it('defers OpenCode defaults to its ACP catalog instead of showing Claude choices', () => {
+        expect(getOpenCodePermissionModes()).toEqual([
+            { key: 'default', name: 'Default', description: null },
+        ]);
+        expect(getOpenCodeModelModes()).toEqual([
+            { key: 'default', name: 'Default model', description: null },
+        ]);
+        expect(getDefaultPermissionModeKey('opencode')).toBe('default');
+        expect(getDefaultModelKey('opencode')).toBe('default');
+        expect(getDefaultEffortKey('opencode')).toBeNull();
+    });
+
+    it('uses models and modes published by an OpenCode ACP session', () => {
+        const metadata = {
+            models: [
+                { code: 'zai-coding-plan/glm-4.7', value: 'GLM 4.7', description: 'Z.AI' },
+                { code: 'anthropic/claude-sonnet-4-6', value: 'Claude Sonnet 4.6', description: 'Anthropic' },
+            ],
+            operatingModes: [
+                { code: 'build', value: 'Build', description: 'Full development access' },
+                { code: 'plan', value: 'Plan', description: 'Read-only planning' },
+            ],
+        } as any;
+
+        expect(getAvailableModels('opencode', metadata, translate).map((model) => model.key)).toEqual([
+            'zai-coding-plan/glm-4.7',
+            'anthropic/claude-sonnet-4-6',
+        ]);
+        expect(getAvailablePermissionModes('opencode', metadata, translate).map((mode) => mode.key)).toEqual([
+            'plan',
+            'build',
+        ]);
     });
 
     it('offers every codex model the levels its own registry publishes', () => {

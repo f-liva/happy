@@ -45,6 +45,11 @@ describe('agent defaults', () => {
     });
 
     it('does not change non-code-agent defaults for an old CLI', () => {
+        expect(resolveAgentDefaultConfig({}, 'opencode', '1.0.0')).toEqual({
+            permissionMode: 'default',
+            modelMode: 'default',
+            effortLevel: null,
+        });
         expect(resolveAgentDefaultConfig({}, 'gemini', '1.0.0').permissionMode).toBe('default');
         expect(resolveAgentDefaultConfig({}, 'openclaw', '1.0.0').permissionMode).toBe('default');
         expect(resolveAgentDefaultConfig({}, 'agy', '1.0.0').permissionMode).toBe('default');

@@ -133,6 +133,7 @@ describe('what a computer can actually run', () => {
     it('believes a CLI that reports nothing, rather than assuming it has everything', () => {
         const choice = collectMachineChoices([machine('bare', { host: 'old.local' })])[0];
         expect(machineChoiceAgentAvailable(choice, 'claude')).toBe(true);
+        expect(machineChoiceAgentAvailable(choice, 'opencode')).toBe(false);
         expect(machineChoiceAgentAvailable(choice, 'agy')).toBe(false);
         expect(machineChoiceAgentAvailable(choice, 'rig')).toBe(false);
     });
@@ -142,7 +143,7 @@ describe('what a computer can actually run', () => {
         const paired = collectMachineChoices([cli(), rig()])[0];
         const installed = collectMachineChoices([machine('agy-machine', {
             host: 'laptop.local',
-            cliAvailability: { claude: true, agy: true },
+            cliAvailability: { claude: true, opencode: true, agy: true },
         })])[0];
 
         expect(listMachineChoiceAvailableAgents(absent)).toEqual(['claude', 'codex']);

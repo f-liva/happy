@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appendDaemonSpawnModeArgs, shouldForwardDaemonPermissionMode } from './spawnModeArgs';
+import { appendDaemonSpawnModeArgs, buildDaemonSpawnArgs, shouldForwardDaemonPermissionMode } from './spawnModeArgs';
 
 describe('daemon spawn mode arguments', () => {
   it('forwards Codex default because it is a concrete ask-first policy', () => {
@@ -38,5 +38,49 @@ describe('daemon spawn mode arguments', () => {
   it('uses the same Codex default rule for resume launches', () => {
     expect(shouldForwardDaemonPermissionMode('codex', 'default')).toBe(true);
     expect(shouldForwardDaemonPermissionMode('claude', 'default')).toBe(false);
+  });
+
+  it('launches OpenCode through the existing ACP runner', () => {
+    expect(buildDaemonSpawnArgs({
+      directory: '/repo',
+      agent: 'opencode',
+    })).toEqual([
+      'acp',
+      'opencode',
+      '--started-by',
+      'daemon',
+    ]);
+  });
+
+  it('keeps existing daemon launch and resume arguments intact', () => {
+    expect(buildDaemonSpawnArgs({
+      directory: '/repo',
+      agent: 'codex',
+      permissionMode: 'auto',
+      modelMode: 'gpt-5.6-sol',
+      effortLevel: 'high',
+      resumeCodexThreadId: 'thread-1',
+    })).toEqual([
+      'codex',
+      '--happy-starting-mode',
+      'remote',
+      '--started-by',
+      'daemon',
+      '--permission-mode',
+      'auto',
+      '--model',
+      'gpt-5.6-sol',
+      '--effort',
+      'high',
+      '--resume',
+      'thread-1',
+    ]);
+  });
+
+  it('still rejects unknown agent values received at runtime', () => {
+    expect(() => buildDaemonSpawnArgs({
+      directory: '/repo',
+      agent: 'future-agent' as never,
+    })).toThrow("Unsupported agent type: 'future-agent'");
   });
 });

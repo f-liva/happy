@@ -44,6 +44,7 @@ import {
     resolveMobileComposerMenuGeometry,
 } from './agentInputLayout';
 import { shouldUseExpoNativeSettingsMenu } from './glassInteractionPolicy';
+import { getHarnessName } from '@/utils/harnessCatalog';
 
 interface AgentInputProps {
     // `initialValue` seeds the uncontrolled textarea once; keystrokes never
@@ -104,7 +105,7 @@ interface AgentInputProps {
     /** Plan quota windows from agent state, for the week stat and its popup. */
     sessionStatusUsageLimits?: UsageLimitsLike | null;
     onFileViewerPress?: () => void;
-    agentType?: 'claude' | 'codex' | 'gemini' | 'openclaw' | 'agy';
+    agentType?: 'claude' | 'codex' | 'opencode' | 'gemini' | 'openclaw' | 'agy';
     onAgentClick?: () => void;
     machineName?: string | null;
     onMachineClick?: () => void;
@@ -1470,9 +1471,11 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                         ? t('agentInput.agent.claude')
                                         : props.agentType === 'codex'
                                             ? t('agentInput.agent.codex')
-                                            : props.agentType === 'openclaw'
-                                                ? t('agentInput.agent.openclaw')
-                                                : t('agentInput.agent.gemini')}
+                                            : props.agentType === 'opencode'
+                                                ? getHarnessName('opencode')
+                                                : props.agentType === 'openclaw'
+                                                    ? t('agentInput.agent.openclaw')
+                                                    : t('agentInput.agent.gemini')}
                                 </Text>
                             </Pressable>
                         )}

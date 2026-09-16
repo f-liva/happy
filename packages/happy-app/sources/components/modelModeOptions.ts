@@ -222,6 +222,12 @@ export function getOpenClawPermissionModes(translate: Translate): PermissionMode
     ];
 }
 
+export function getOpenCodePermissionModes(): PermissionMode[] {
+    return [
+        { key: 'default', name: 'Default', description: null },
+    ];
+}
+
 // agy --print only distinguishes --sandbox (default) from --dangerously-skip-permissions,
 // so only these two modes are offered. Default gets its own wording because agy
 // --print is one-shot and cannot prompt: it never asks, it just runs under agy's
@@ -310,6 +316,9 @@ export function getHardcodedPermissionModes(flavor: AgentFlavor, translate: Tran
     if (flavor === 'codex') {
         return getCodexPermissionModes(translate);
     }
+    if (flavor === 'opencode') {
+        return getOpenCodePermissionModes();
+    }
     if (flavor === 'gemini') {
         return getGeminiPermissionModes(translate);
     }
@@ -323,6 +332,12 @@ export function getHardcodedPermissionModes(flavor: AgentFlavor, translate: Tran
 }
 
 export function getOpenClawModelModes(): ModelMode[] {
+    return [
+        { key: 'default', name: 'Default model', description: null },
+    ];
+}
+
+export function getOpenCodeModelModes(): ModelMode[] {
     return [
         { key: 'default', name: 'Default model', description: null },
     ];
@@ -343,6 +358,9 @@ export function getAgyModelModes(): ModelMode[] {
 export function getHardcodedModelModes(flavor: AgentFlavor, _translate: Translate): ModelMode[] {
     if (flavor === 'codex') {
         return getCodexModelModes();
+    }
+    if (flavor === 'opencode') {
+        return getOpenCodeModelModes();
     }
     if (flavor === 'gemini') {
         return getGeminiModelModes();

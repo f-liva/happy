@@ -41,4 +41,19 @@ describe('CLI availability detection', () => {
 
     expect(detectCLIAvailability().agy).toBe(true);
   });
+
+  it('reports OpenCode when its executable is on PATH', () => {
+    mockedExecSync.mockImplementation((command) => {
+      if (String(command).includes('command -v opencode')) {
+        return Buffer.from('/home/person/.opencode/bin/opencode');
+      }
+      throw new Error('not installed');
+    });
+
+    const availability = detectCLIAvailability();
+
+    expect(availability.opencode).toBe(true);
+    expect(availability.claude).toBe(false);
+    expect(availability.codex).toBe(false);
+  });
 });

@@ -465,6 +465,7 @@ export const MachineMetadataSchema = z.object({
     cliAvailability: z.object({
         claude: z.boolean(),
         codex: z.boolean(),
+        opencode: z.boolean().optional(), // optional: older CLIs don't report OpenCode
         gemini: z.boolean(),
         openclaw: z.boolean(),
         agy: z.boolean().optional(), // optional: older CLIs don't report agy

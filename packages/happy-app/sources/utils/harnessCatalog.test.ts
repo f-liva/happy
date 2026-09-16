@@ -3,8 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { HARNESS_NAMES, isRetiredHarness, listAvailableHarnesses } from './harnessCatalog';
 
 describe('harness catalog', () => {
-    it('names Happy and Antigravity by product, not by CLI id', () => {
+    it('names Happy, OpenCode, and Antigravity by product', () => {
         expect(HARNESS_NAMES.rig).toBe('Happy');
+        expect(HARNESS_NAMES.opencode).toBe('OpenCode');
         expect(HARNESS_NAMES.agy).toBe('Antigravity');
     });
 
@@ -18,15 +19,16 @@ describe('harness catalog', () => {
 
     it('lists only installed harnesses, in pick order', () => {
         const harnesses = listAvailableHarnesses({
-            availability: { claude: true, codex: true, agy: true },
+            availability: { claude: true, codex: true, opencode: true, agy: true },
             happyAgentAvailable: true,
             selected: 'claude',
         });
 
-        expect(harnesses.map((harness) => harness.key)).toEqual(['claude', 'codex', 'agy', 'rig']);
+        expect(harnesses.map((harness) => harness.key)).toEqual(['claude', 'codex', 'opencode', 'agy', 'rig']);
         expect(harnesses.map((harness) => harness.name)).toEqual([
             'Claude Code',
             'Codex',
+            'OpenCode',
             'Antigravity',
             'Happy',
         ]);
@@ -67,6 +69,20 @@ describe('harness catalog', () => {
         });
 
         expect(harnesses.map((harness) => harness.key)).toEqual(['claude', 'codex']);
+    });
+
+    it('only offers OpenCode when the machine reports its CLI installed', () => {
+        expect(listAvailableHarnesses({
+            availability: { claude: true, opencode: false },
+            happyAgentAvailable: false,
+            selected: 'claude',
+        }).map((harness) => harness.key)).toEqual(['claude']);
+
+        expect(listAvailableHarnesses({
+            availability: { claude: true, opencode: true },
+            happyAgentAvailable: false,
+            selected: 'claude',
+        }).map((harness) => harness.key)).toEqual(['claude', 'opencode']);
     });
 
     it('keeps the current selection listed even once its CLI disappears', () => {

@@ -119,11 +119,25 @@ type AgentKey = NewSessionAgentType;
 const ALL_AGENTS: { key: AgentKey; label: string }[] = [
     { key: 'claude', label: 'claude code' },
     { key: 'codex', label: 'codex' },
+    { key: 'opencode', label: 'opencode' },
     { key: 'agy', label: 'antigravity' },
     { key: 'rig', label: 'happy' },
 ];
 
 type PickerItem = { key: string; label: string; subtitle?: string; dimmed?: boolean; section?: string };
+
+function AgentIcon({ agent, compact, color }: { agent: AgentKey; compact?: boolean; color: string }) {
+    const source = agentIcons[agent as keyof typeof agentIcons];
+    const style = compact ? styles.collapsedAgentIcon : styles.agentIcon;
+    if (!source) {
+        return (
+            <View style={[style, { alignItems: 'center', justifyContent: 'center' }]}>
+                <Octicons name="terminal" size={compact ? 13 : 14} color={color} />
+            </View>
+        );
+    }
+    return <RNImage source={source} style={[style, { tintColor: color }]} resizeMode="contain" />;
+}
 
 type PickerType = 'machine' | 'path' | 'worktree' | 'agent' | 'model' | 'effort' | 'permission' | 'settings';
 
@@ -1924,11 +1938,7 @@ function NewSessionScreen() {
                                             onPress={() => togglePicker('agent')}
                                             style={(p) => [styles.configInlineField, p.pressed && styles.configRowPressed]}
                                         >
-                                            <RNImage
-                                                source={agentIcons[agent.key]}
-                                                style={[styles.agentIcon, { tintColor: theme.colors.textSecondary }]}
-                                                resizeMode="contain"
-                                            />
+                                            <AgentIcon agent={agent.key} color={theme.colors.textSecondary} />
                                             <Text style={[styles.configLabel, styles.configInlineText]} numberOfLines={1}>
                                                 {agent.label}
                                             </Text>
@@ -2041,11 +2051,7 @@ function NewSessionScreen() {
                                         hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                                         style={(p) => [styles.collapsedIconButton, p.pressed && styles.configRowPressed]}
                                     >
-                                        <RNImage
-                                            source={agentIcons[agent.key]}
-                                            style={[styles.collapsedAgentIcon, { tintColor: theme.colors.textSecondary }]}
-                                            resizeMode="contain"
-                                        />
+                                        <AgentIcon agent={agent.key} compact color={theme.colors.textSecondary} />
                                     </BubblePressable>
 
                                     {showPermission && (
@@ -2186,11 +2192,7 @@ function NewSessionScreen() {
                             accessibilityRole="button"
                             accessibilityLabel={`Agent: ${agent.label}`}
                         >
-                            <RNImage
-                                source={agentIcons[agent.key]}
-                                style={[styles.collapsedAgentIcon, { tintColor: theme.colors.textSecondary }]}
-                                resizeMode="contain"
-                            />
+                            <AgentIcon agent={agent.key} compact color={theme.colors.textSecondary} />
                             <Text style={styles.composerAgentLabel} numberOfLines={1}>
                                 {agent.label}
                             </Text>

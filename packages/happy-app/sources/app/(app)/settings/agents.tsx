@@ -45,6 +45,7 @@ type FieldConfig = {
 const agentLabels: Record<AgentKey, string> = {
     claude: getHarnessName('claude'),
     codex: getHarnessName('codex'),
+    opencode: getHarnessName('opencode'),
     gemini: getHarnessName('gemini'),
     openclaw: getHarnessName('openclaw'),
     agy: getHarnessName('agy'),
@@ -53,7 +54,12 @@ const agentLabels: Record<AgentKey, string> = {
 // A retired harness keeps its stored defaults — the schema still carries them,
 // and "Reset all" still clears them — but there is nothing to configure for an
 // agent you can no longer start a session with.
-const configurableAgentKeys = agentKeys.filter((agent) => !isRetiredHarness(agent));
+const configurableAgentKeys = agentKeys.filter((agent) => (
+    !isRetiredHarness(agent)
+    // OpenCode owns a dynamic ACP catalog. Its model and mode controls appear
+    // once a session is running instead of pretending its defaults are static.
+    && agent !== 'opencode'
+));
 
 function optionName(options: ModeOption[], key: string | null | undefined): string {
     if (!key) return 'none';
