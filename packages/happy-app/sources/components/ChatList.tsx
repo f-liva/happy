@@ -372,6 +372,20 @@ const ChatListInternal = React.memo((props: {
         setOlderBlocked(null);
     }, [props.sessionId]);
 
+    // The jump-to-newest button shrinks the window to INITIAL_WINDOW again
+    // (the pin effect re-pins it). Only that explicit jump: history fills in on
+    // its own while the list sits at offset 0, so shrinking on plain scroll
+    // position would undo the fill. The window only ever grew while the reader
+    // explored history; without this a chat once scrolled to its top kept
+    // every message rendered — re-windowed, re-grouped and re-joined on every
+    // update — for the rest of the tab's life. The rows dropped sit at the far
+    // end of the inverted list, above the viewport.
+    const shrinkWindowToNewest = useCallback(() => {
+        if (requestedWindowEndRef.current === 0) return;
+        requestedWindowEndRef.current = 0;
+        setOldestRenderedId(null);
+    }, []);
+
     const displayItems = useGroupedMessages(windowedMessages, groupToolCalls, groupingOptions);
 
     const currentTurnUserMessageId = React.useMemo(() => {
@@ -669,7 +683,8 @@ const ChatListInternal = React.memo((props: {
     // the origin rather than a measurement of where the content currently ends.
     const scrollToBottom = useCallback(() => {
         listRef.current?.scrollToOffset({ offset: 0, animated: true });
-    }, []);
+        shrinkWindowToNewest();
+    }, [shrinkWindowToNewest]);
 
     // History fills in ahead of the reader. Whenever the oldest rendered
     // message is within a viewport of the screen — which includes a list too
