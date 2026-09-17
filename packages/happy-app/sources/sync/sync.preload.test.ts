@@ -23,7 +23,7 @@ vi.mock('expo-crypto', () => ({ randomUUID: () => 'id' }));
 vi.mock('expo-notifications', () => ({}));
 vi.mock('react-native', () => ({ Platform: { OS: 'ios' }, AppState: { currentState: 'active', addEventListener: vi.fn() } }));
 vi.mock('@/utils/platform', () => ({ isRunningOnMac: () => false }));
-vi.mock('@/sync/apiSocket', () => ({ apiSocket: { request: mocks.request }, getCurrentAppState: () => 'active', getHappyClientId: () => 'test' }));
+vi.mock('@/sync/apiSocket', () => ({ apiSocket: { request: mocks.request, sendAppState: vi.fn() }, getCurrentAppState: () => 'active', getHappyClientId: () => 'test' }));
 vi.mock('@/sync/webTabTitle', () => ({ notifyUnreadMessage: vi.fn() }));
 vi.mock('@/sync/encryption/encryption', () => ({ Encryption: class {} }));
 vi.mock('@/sync/encryption/artifactEncryption', () => ({ ArtifactEncryption: class {} }));
@@ -38,6 +38,7 @@ vi.mock('@/sync/storage', () => ({ storage: { getState: () => ({
     applyMessages: mocks.applyMessages,
     applyMessagesLoaded: mocks.applyMessagesLoaded,
     applyOlderMessagesPagination: mocks.applyOlderMessagesPagination,
+    evictSessionMessages: (id: string) => { delete mocks.state.sessionMessages[id]; },
 }) } }));
 vi.mock('@/sync/ops', () => ({ sessionSetAgentModes: mocks.setModes }));
 vi.mock('@/sync/persistence', () => ({ loadPendingSettings: () => ({}), savePendingSettings: vi.fn() }));
@@ -64,6 +65,7 @@ vi.mock('@/realtime/hooks/voiceHooks', () => ({ voiceHooks: {
     onSessionFocus: mocks.voiceFocus, onMessages: mocks.voiceMessages, onReady: mocks.voiceReady,
 } }));
 
+import { AppState } from 'react-native';
 import { sync } from './sync';
 
 let engine: any;
@@ -263,5 +265,66 @@ describe('chat preload sync integration', () => {
         expect(mocks.voiceFocus).toHaveBeenCalledWith('a', {});
         expect(mocks.state.currentViewingSessionId).toBeNull();
         expect(older).not.toHaveBeenCalled();
+    });
+
+    it('a message streaming into a chat that is neither open nor resident fetches nothing', async () => {
+        (encryption as any).decryptMessage = vi.fn(async () => message());
+        mocks.state.currentViewingSessionId = 'a';
+        const wire = { ...message(), content: { t: 'encrypted', c: 'opaque' }, updatedAt: 1 };
+        await engine.handleUpdate({ id: 'u1', seq: 1, createdAt: 1, body: { t: 'new-message', sid: 'b', message: wire } });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(mocks.request).not.toHaveBeenCalled();
+        expect(mocks.gitInvalidate).not.toHaveBeenCalled();
+        expect(mocks.voiceFocus).toHaveBeenCalledWith('b', {});
+        expect(mocks.state.sessionMessages.b).toBeUndefined();
+    });
+
+    it('does not retry a chat the server says is gone', async () => {
+        mocks.request.mockResolvedValueOnce({ ok: false, status: 404 }).mockResolvedValue(response([message()]));
+        engine.onSessionVisible('a');
+        await engine.getMessagesSync('a').awaitQueue();
+        expect(mocks.request).toHaveBeenCalledOnce();
+        expect(engine.sessionLastSeq.has('a')).toBe(false);
+        expect(mocks.applyMessagesLoaded).not.toHaveBeenCalled();
+    });
+
+    it('releases chats that fell out of the recently viewed window and reloads them afresh', async () => {
+        mocks.state.sessions.c = { id: 'c', permissionMode: 'auto', metadata: {} };
+        mocks.state.sessions.d = { id: 'd', permissionMode: 'auto', metadata: {} };
+        for (const id of ['a', 'b', 'c', 'd']) {
+            mocks.state.currentViewingSessionId = id;
+            engine.onSessionVisible(id);
+            await engine.getMessagesSync(id).awaitQueue();
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            mocks.state.currentViewingSessionId = null;
+            engine.onSessionHidden(id);
+        }
+        expect(mocks.state.sessionMessages.a).toBeUndefined();
+        expect(mocks.state.sessionMessages.b).toBeDefined();
+        expect(engine.sessionLastSeq.has('a')).toBe(false);
+        expect(engine.messagesSync.has('a')).toBe(false);
+        mocks.state.currentViewingSessionId = 'a';
+        engine.onSessionVisible('a');
+        await engine.getMessagesSync('a').awaitQueue();
+        expect(mocks.request.mock.calls.at(-1)?.[0]).toBe('/v3/sessions/a/messages?before_seq=2147483647&limit=100');
+        expect(mocks.state.sessionMessages.a).toBeDefined();
+    });
+});
+
+describe('app resume', () => {
+    it('skips the full list refreshes on refocus while the socket stayed connected', () => {
+        const onAppState = (AppState.addEventListener as any).mock.calls[0][1] as (state: string) => void;
+        const syncs = ['purchasesSync', 'profileSync', 'pushTokenSync', 'nativeUpdateSync', 'machinesSync', 'sessionsSync', 'artifactsSync', 'friendsSync', 'friendRequestsSync', 'feedSync'];
+        for (const name of syncs) engine[name] = { invalidate: vi.fn() };
+        mocks.state.socketStatus = 'connected';
+        onAppState('active');
+        expect(engine.sessionsSync.invalidate).not.toHaveBeenCalled();
+        expect(engine.machinesSync.invalidate).not.toHaveBeenCalled();
+        expect(engine.feedSync.invalidate).not.toHaveBeenCalled();
+        expect(engine.profileSync.invalidate).toHaveBeenCalledOnce();
+        mocks.state.socketStatus = 'connecting';
+        onAppState('active');
+        expect(engine.sessionsSync.invalidate).toHaveBeenCalledOnce();
+        expect(engine.machinesSync.invalidate).toHaveBeenCalledOnce();
     });
 });

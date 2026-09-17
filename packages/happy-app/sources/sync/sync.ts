@@ -111,6 +111,12 @@ type V3GetSessionMessagesResponse = {
 // within int4 while still being effectively "infinite" for any session.
 const SEQ_BACKWARD_INITIAL_SENTINEL = 2_147_483_647;
 
+// 404: the session was deleted; 410: it is gone for good. Neither is a
+// transient failure worth retrying.
+function isSessionGone(status: number): boolean {
+    return status === 404 || status === 410;
+}
+
 type V3PostSessionMessagesResponse = {
     messages: Array<{
         id: string;
@@ -169,6 +175,11 @@ class Sync {
     private messagePreloader = new SessionMessagePreloader((sessionId, signal) => this.preloadLatestPage(sessionId, signal));
     private historyPrefetchSessions = new Set<string>();
     private olderMessagesPrefetching = new Set<string>();
+    // Chats whose messages stay resident after the user leaves them, most
+    // recently viewed last. Only the last RESIDENT_SESSIONS survive a hidden
+    // event; see onSessionHidden.
+    private recentlyViewedSessions: string[] = [];
+    private static readonly RESIDENT_SESSIONS = 3;
     private preloadedPlanModes = new Map<string, Session['permissionMode']>();
     private sendSync = new Map<string, InvalidateSync>();
     private sendAbortControllers = new Map<string, AbortController>();
@@ -267,15 +278,23 @@ class Sync {
                 log.log('📱 App became active');
                 this.purchasesSync.invalidate();
                 this.profileSync.invalidate();
-                this.machinesSync.invalidate();
                 this.pushTokenSync.invalidate();
-                this.sessionsSync.invalidate();
                 this.nativeUpdateSync.invalidate();
-                log.log('📱 App became active: Invalidating artifacts sync');
-                this.artifactsSync.invalidate();
-                this.friendsSync.invalidate();
-                this.friendRequestsSync.invalidate();
-                this.feedSync.invalidate();
+                // On web, AppState turns 'active' on every tab refocus. While
+                // the data socket stayed connected the live updates already
+                // covered the gap, so the full list refreshes are skipped: the
+                // sessions one alone is a GET /v1/sessions, up to 150 session
+                // decrypts and 7 applySessions rebuilds, paid on every alt-tab.
+                // A socket that dropped runs the same set from onReconnected.
+                if (storage.getState().socketStatus !== 'connected') {
+                    this.machinesSync.invalidate();
+                    this.sessionsSync.invalidate();
+                    log.log('📱 App became active: Invalidating artifacts sync');
+                    this.artifactsSync.invalidate();
+                    this.friendsSync.invalidate();
+                    this.friendRequestsSync.invalidate();
+                    this.feedSync.invalidate();
+                }
 
                 // Refresh the open chat's message log on resume. While the app is
                 // backgrounded the data socket is suspended/dropped, so any messages
@@ -384,6 +403,8 @@ class Sync {
 
     onSessionVisible = (sessionId: string) => {
         releaseSpawnedSession(sessionId);
+        this.recentlyViewedSessions = this.recentlyViewedSessions.filter((id) => id !== sessionId);
+        this.recentlyViewedSessions.push(sessionId);
         this.historyPrefetchSessions.add(sessionId);
         this.refreshSessionData(sessionId);
         // Also cover focus arriving while the speculative first page is still
@@ -415,6 +436,51 @@ class Sync {
         this.notifyVoiceSessionFocus(sessionId);
     }
 
+    /**
+     * A chat screen went away. Its messages stay resident, with those of the
+     * other most recently viewed chats, so going back is instant; whatever
+     * fell out of that window is released now. Nothing else ever freed
+     * sessionMessages: every chat opened during the life of the tab stayed in
+     * memory (reducer state + messagesMap + array, about twice its size) for
+     * good, and its per-session sync kept forward-syncing on every seq gap.
+     */
+    onSessionHidden = (sessionId: string) => {
+        log.log(`👋 Session ${sessionId} hidden`);
+        const viewing = storage.getState().currentViewingSessionId;
+        const stale = this.recentlyViewedSessions.slice(0, -Sync.RESIDENT_SESSIONS);
+        for (const id of stale) {
+            if (id === viewing || !this.releaseSessionMessages(id)) continue;
+            this.recentlyViewedSessions = this.recentlyViewedSessions.filter((other) => other !== id);
+        }
+    }
+
+    // Frees a session's message log and the sync state tied to it, as the
+    // delete-session handler does, so the next visit is a clean initial load.
+    // Refuses while anything is still in flight for the session — an unsent
+    // message, a fetch, a queued batch, a history page — and the caller
+    // retries at the next hidden event. The AsyncLock is kept on purpose: a
+    // late preload still holds it, and a new one would let the reload overlap.
+    private releaseSessionMessages = (sessionId: string): boolean => {
+        const busy = (this.pendingOutbox.get(sessionId)?.length ?? 0) > 0
+            || this.sendAbortControllers.has(sessionId)
+            || this.messagesSync.get(sessionId)?.isBusy
+            || this.sessionQueueProcessing.has(sessionId)
+            || (this.sessionMessageQueue.get(sessionId)?.length ?? 0) > 0
+            || this.olderMessagesPrefetching.has(sessionId)
+            || storage.getState().sessionMessages[sessionId]?.isLoadingOlder;
+        if (busy) return false;
+        this.messagesSync.get(sessionId)?.stop();
+        this.messagesSync.delete(sessionId);
+        this.sessionLastSeq.delete(sessionId);
+        this.sessionOldestSeq.delete(sessionId);
+        this.sessionMessageQueue.delete(sessionId);
+        this.historyPrefetchSessions.delete(sessionId);
+        this.preloadedPlanModes.delete(sessionId);
+        storage.getState().evictSessionMessages(sessionId);
+        log.log(`🧹 Released messages of session ${sessionId}`);
+        return true;
+    }
+
     preloadSession = (sessionId: string) => {
         this.messagePreloader.preload(sessionId);
     }
@@ -440,7 +506,7 @@ class Sync {
                 || this.sessionLastSeq.has(sessionId)) {
                 return false;
             }
-            await this.fetchInitialLatestPage(sessionId, encryption, signal);
+            if (!await this.fetchInitialLatestPage(sessionId, encryption, signal)) return false;
             storage.getState().applyMessagesLoaded(sessionId);
             return true;
         });
@@ -2334,12 +2400,12 @@ class Sync {
                 // from displaying anything for sessions with thousands of
                 // messages. The user's reported pain point was "opening a long
                 // session feels frozen" — this is the fix.
-                await this.fetchInitialLatestPage(sessionId, encryption);
+                if (!await this.fetchInitialLatestPage(sessionId, encryption)) return;
             } else {
                 // Forward incremental sync. Used after reconnect, invalidate,
                 // or any subsequent visit. Only pulls messages newer than what
                 // we already have, so it's bounded and fast in normal use.
-                await this.fetchForwardSince(sessionId, encryption, knownLastSeq);
+                if (!await this.fetchForwardSince(sessionId, encryption, knownLastSeq)) return;
             }
 
             storage.getState().applyMessagesLoaded(sessionId);
@@ -2415,6 +2481,12 @@ class Sync {
             { signal: preloadSignal },
         );
         if (!response.ok) {
+            // A session the server no longer has will not come back; a throw
+            // here would make its InvalidateSync retry for the life of the tab.
+            if (isSessionGone(response.status)) {
+                log.log(`💬 Session ${sessionId} is gone from the server (${response.status}), not retrying`);
+                return false;
+            }
             throw new Error(`Failed to fetch initial page for ${sessionId}: ${response.status}`);
         }
         const data = await response.json() as V3GetSessionMessagesResponse;
@@ -2437,6 +2509,7 @@ class Sync {
         storage.getState().applyOlderMessagesPagination(sessionId, {
             hasMore: !!data.hasMore && messages.length > 0
         });
+        return true;
     }
 
     private fetchForwardSince = async (
@@ -2448,6 +2521,10 @@ class Sync {
         while (true) {
             const response = await apiSocket.request(`/v3/sessions/${sessionId}/messages?after_seq=${afterSeq}&limit=100`);
             if (!response.ok) {
+                if (isSessionGone(response.status)) {
+                    log.log(`💬 Session ${sessionId} is gone from the server (${response.status}), not retrying`);
+                    return false;
+                }
                 throw new Error(`Failed to forward-sync ${sessionId}: ${response.status}`);
             }
             const data = await response.json() as V3GetSessionMessagesResponse;
@@ -2468,6 +2545,7 @@ class Sync {
             }
             afterSeq = maxSeq;
         }
+        return true;
     }
 
     private applyFetchedMessages = async (
@@ -2646,6 +2724,9 @@ class Sync {
 
             // Decrypt message
             let lastMessage: NormalizedMessage | null = null;
+            // True once the fast path applied the message in order; nothing
+            // else needs to be fetched for it.
+            let appliedInOrder = false;
             if (updateData.body.message) {
                 const decrypted = await encryption.decryptMessage(updateData.body.message);
                 if (decrypted) {
@@ -2707,6 +2788,7 @@ class Sync {
                     if (lastMessage && currentLastSeq !== undefined && incomingSeq === currentLastSeq + 1) {
                         this.enqueueMessages(updateData.body.sid, [lastMessage]);
                         this.sessionLastSeq.set(updateData.body.sid, incomingSeq);
+                        appliedInOrder = true;
                         let hasMutableTool = false;
                         if (lastMessage.role === 'agent' && lastMessage.content[0] && lastMessage.content[0].type === 'tool-result') {
                             hasMutableTool = storage.getState().isMutableToolCall(updateData.body.sid, lastMessage.content[0].tool_use_id);
@@ -2714,14 +2796,32 @@ class Sync {
                         if (hasMutableTool) {
                             gitStatusSync.invalidate(updateData.body.sid);
                         }
-                    } else {
-                        this.getMessagesSync(updateData.body.sid).invalidate();
                     }
                 }
             }
 
             // A socket update refreshes data; it is not a user opening a chat.
-            this.onSessionDataUpdated(updateData.body.sid);
+            //
+            // Only the open chat pays for a server round trip, and only when the
+            // fast path could not apply the message in order (seq gap, unknown
+            // seq, undecryptable). This used to run for every message of every
+            // session: a forward-sync GET that returned nothing after the fast
+            // path had already advanced seq, plus four git RPCs on the daemon
+            // (bypassing the 300 ms debounce), and for a session never opened it
+            // loaded 100 messages into memory that were never released. With
+            // dozens of sessions streaming that was the tab's background load.
+            const sid = updateData.body.sid;
+            if (!appliedInOrder && sid === storage.getState().currentViewingSessionId) {
+                this.onSessionDataUpdated(sid);
+            } else {
+                // A gap in a chat that is resident but not open (recently
+                // viewed, preloaded, or with an optimistic send) is closed by a
+                // bounded forward sync. Anything else loads on open.
+                if (!appliedInOrder && storage.getState().sessionMessages[sid]) {
+                    this.getMessagesSync(sid).invalidate();
+                }
+                this.notifyVoiceSessionFocus(sid);
+            }
 
         } else if (updateData.body.t === 'new-session') {
             log.log('🆕 New session update received');
@@ -2832,7 +2932,13 @@ class Sync {
                     if (handoffDirection) {
                         const target = handoffDirection === 'desktop-to-mobile' ? 'mobile' : 'desktop';
                         log.log(`🔄 Control returned to ${target} for session ${updateData.body.id}, re-fetching messages`);
-                        this.onSessionDataUpdated(updateData.body.id);
+                        // Only the open chat is worth a round trip; a chat that
+                        // is not on screen catches up when it is opened.
+                        if (updateData.body.id === storage.getState().currentViewingSessionId) {
+                            this.onSessionDataUpdated(updateData.body.id);
+                        } else {
+                            this.notifyVoiceSessionFocus(updateData.body.id);
+                        }
                     }
                 }
             }
