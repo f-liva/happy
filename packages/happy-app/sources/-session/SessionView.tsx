@@ -30,7 +30,7 @@ import { getCurrentVoiceConversationId, getCurrentVoiceSessionDurationSeconds, s
 import { sessionAbort, sessionCancelCommunication, sessionGoalAction, sessionSetAgentModes, spawnSideChat, sessionKill, sessionArchive } from '@/sync/ops';
 import { dismissPendingChat, getPendingChat, setPendingChatDraft, submitPendingChat, usePendingChat, type PendingChat } from '@/sync/pendingChats';
 import { claimComposerFocus } from '@/utils/composerFocus';
-import { storage, useIsDataReady, useLocalSetting, useRealtimeStatus, useSessionGitStatus, useSessionMessages, useSessionPendingCommunications, useSessionAvatar, useSessionUsage, useSetting, useSideChatSessions } from '@/sync/storage';
+import { storage, useIsDataReady, useLocalSetting, useRealtimeStatus, useSessionGitStatus, useSessionPendingCommunications, useSessionAvatar, useSessionUsage, useSetting, useSideChatSessions } from '@/sync/storage';
 import { useSession } from '@/sync/storage';
 import { getSessionForkSource } from '@/utils/sessionFork';
 import { useHappyAction } from '@/hooks/useHappyAction';
@@ -62,6 +62,7 @@ import { ActivityIndicator, LayoutChangeEvent, Platform, Pressable, Text, View }
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, Easing } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { useShallow } from 'zustand/react/shallow';
 import type { ModelMode, PermissionMode } from '@/components/PermissionModeSelector';
 import { performAgentGoalAction } from './agentGoalActionHandler';
 import { MOBILE_GLASS_HEADER_HEIGHT } from '@/components/navigation/headerMetrics';
@@ -826,7 +827,16 @@ export function SessionViewLoaded({
     }, [sessionId, usesFloatingMobileDock]);
 
     const realtimeStatus = useRealtimeStatus();
-    const { messages, isLoaded } = useSessionMessages(sessionId ?? '');
+    // Only "any messages?" and "loaded?" matter here. Subscribing to the
+    // messages array itself re-rendered this whole tree, composer included,
+    // on every message of the open session.
+    const { hasMessages, isLoaded } = storage(useShallow((state) => {
+        const sessionMessages = state.sessionMessages[sessionId ?? ''];
+        return {
+            hasMessages: (sessionMessages?.messages.length ?? 0) > 0,
+            isLoaded: sessionMessages?.isLoaded ?? false,
+        };
+    }));
     const pendingCommunications = useSessionPendingCommunications(sessionId ?? '');
     const acknowledgedCliVersions = useLocalSetting('acknowledgedCliVersions');
     const zenMode = useLocalSetting('zenMode');
@@ -1031,18 +1041,29 @@ export function SessionViewLoaded({
         isPulsing: sessionStatus.isPulsing,
     }), [sessionStatus.statusText, sessionStatus.statusColor, sessionStatus.statusDotColor, sessionStatus.isPulsing]);
 
+    const usageSource = sessionUsage ?? session?.latestUsage;
+    // Keyed on the usage fields, not the object: the store re-mints
+    // `session.latestUsage` on every applyMessages once usage exists, and a
+    // fresh object here re-rendered AgentInput on every message.
     const usageData = React.useMemo(() => {
-        const source = sessionUsage ?? session?.latestUsage;
-        if (!source) return undefined;
+        if (!usageSource) return undefined;
         return {
-            inputTokens: source.inputTokens,
-            outputTokens: source.outputTokens,
-            cacheCreation: source.cacheCreation,
-            cacheRead: source.cacheRead,
-            contextSize: source.contextSize,
-            contextWindow: source.contextWindow,
+            inputTokens: usageSource.inputTokens,
+            outputTokens: usageSource.outputTokens,
+            cacheCreation: usageSource.cacheCreation,
+            cacheRead: usageSource.cacheRead,
+            contextSize: usageSource.contextSize,
+            contextWindow: usageSource.contextWindow,
         };
-    }, [sessionUsage, session?.latestUsage]);
+    }, [
+        !usageSource,
+        usageSource?.inputTokens,
+        usageSource?.outputTokens,
+        usageSource?.cacheCreation,
+        usageSource?.cacheRead,
+        usageSource?.contextSize,
+        usageSource?.contextWindow,
+    ]);
     const visibleAgentGoal = React.useMemo(() => (
         session ? resolveVisibleAgentGoalStatus(session) : null
     ), [
@@ -1125,7 +1146,7 @@ export function SessionViewLoaded({
     let content = session ? (
         <>
             <Deferred>
-                {messages.length > 0 && (
+                {hasMessages && (
                     // Keyed on the chat: the messages are the one part of this
                     // screen that is genuinely a different thing when a
                     // different chat is in it, and a chat arriving into a
@@ -1150,7 +1171,7 @@ export function SessionViewLoaded({
     ) : null;
     const placeholder = !session ? (
         pending ? <PendingChatPlaceholder pending={pending} /> : null
-    ) : messages.length === 0 ? (
+    ) : !hasMessages ? (
         <>
             {isLoaded ? (
                 <EmptyMessages session={session} />
