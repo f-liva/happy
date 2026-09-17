@@ -94,8 +94,11 @@ vi.mock('@expo/vector-icons', async () => {
     };
 });
 vi.mock('@/sync/storage', () => ({
-    useSession: () => state.session,
+    storage: (selector: (storeState: any) => any) => selector({
+        sessions: state.session ? { [state.session.id]: state.session } : {},
+    }),
     useSessionMessages: () => ({ messages: state.messages, hasMoreOlder: state.hasMoreOlder, isLoadingOlder: state.isLoadingOlder }),
+    useSession: () => state.session,
     useSetting: () => true,
 }));
 vi.mock('@/sync/storageTypes', () => ({}));

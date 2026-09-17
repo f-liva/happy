@@ -1,5 +1,6 @@
 import * as React from 'react';
-import { useSession, useSessionMessages, useSetting } from "@/sync/storage";
+import { storage, useSessionMessages, useSetting } from "@/sync/storage";
+import { useShallow } from 'zustand/react/shallow';
 import { sync } from '@/sync/sync';
 import { ActivityIndicator, AppState, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, View } from 'react-native';
 import { useCallback } from 'react';
@@ -121,6 +122,26 @@ const EMPTY_GROUP_TOGGLES = {
 } as const;
 const EMPTY_WATCHED_TURN_IDS = new Set<string>() as ReadonlySet<string>;
 
+/**
+ * The three facts about the session the list actually reads. Subscribing to
+ * the whole session object re-rendered the list pipeline (window, grouping,
+ * copy text, FlashList) on every activeAt heartbeat, usage update and draft
+ * save of the open session.
+ */
+function useChatSessionFlags(sessionId: string) {
+    return storage(useShallow((state) => {
+        const session = state.sessions[sessionId];
+        const controlled = usesControlledSessionUi(session?.metadata);
+        return {
+            thinking: session?.thinking === true,
+            hasPendingPermission: Boolean(
+                session?.agentState?.requests && Object.keys(session.agentState.requests).length > 0,
+            ),
+            controlledByUser: controlled && (session?.agentState?.controlledByUser || false),
+        };
+    }));
+}
+
 function stringSetsEqual(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
     if (a.size !== b.size) return false;
     for (const value of a) {
@@ -233,9 +254,9 @@ const OlderEnd = React.memo((props: { status: 'idle' | 'loading' | 'error' | 'lo
 
 /** Renders just past the newest message, so the list's header when inverted. */
 const NewerEnd = React.memo((props: { sessionId: string }) => {
-    const session = useSession(props.sessionId)!;
+    const { controlledByUser } = useChatSessionFlags(props.sessionId);
     return (
-        <ChatFooter controlledByUser={usesControlledSessionUi(session.metadata) && (session.agentState?.controlledByUser || false)} />
+        <ChatFooter controlledByUser={controlledByUser} />
     )
 });
 
@@ -278,8 +299,8 @@ const ChatListInternal = React.memo((props: {
     const [olderBlocked, setOlderBlocked] = React.useState<'error' | 'limit' | null>(null);
     // Perf reporting only; history paging keys off measured layout instead.
     const listReadyRef = React.useRef(false);
-    const session = useSession(props.sessionId);
-    const controlMode = resolveControlMode(usesControlledSessionUi(session?.metadata) ? session?.agentState?.controlledByUser : false);
+    const sessionFlags = useChatSessionFlags(props.sessionId);
+    const controlMode = resolveControlMode(sessionFlags.controlledByUser);
     const previousControlModeRef = React.useRef(controlMode);
 
     React.useEffect(() => {
@@ -303,12 +324,10 @@ const ChatListInternal = React.memo((props: {
     // its work visible when it finishes, while a completed turn first seen on
     // open keeps the historic collapsed-by-default behavior.
     const groupToolCalls = useSetting('groupToolCalls');
-    const hasPendingPermission = Boolean(
-        session?.agentState?.requests && Object.keys(session.agentState.requests).length > 0,
-    );
+    const hasPendingPermission = sessionFlags.hasPendingPermission;
     const [appState, setAppState] = React.useState(AppState.currentState);
     const sessionInForeground = props.active && appState !== 'background';
-    const currentTurnComplete = session?.thinking !== true
+    const currentTurnComplete = !sessionFlags.thinking
         && !hasPendingPermission;
     const groupingOptions = React.useMemo(
         () => ({ collapseCurrentTurn: currentTurnComplete }),
