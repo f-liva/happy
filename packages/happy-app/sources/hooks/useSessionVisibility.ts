@@ -25,8 +25,13 @@ export function useSessionVisibility(sessionId: string | null, active: boolean, 
     // claimed it: discarding a preload must not clear another screen's state.
     React.useLayoutEffect(() => {
         return () => {
-            if (claimedView.current && !embedded && storage.getState().currentViewingSessionId === sessionId) {
-                storage.getState().setCurrentViewingSession(null);
+            if (claimedView.current && !embedded) {
+                if (storage.getState().currentViewingSessionId === sessionId) {
+                    storage.getState().setCurrentViewingSession(null);
+                }
+                // The screen is gone: sync may now release chats that fell out
+                // of its recently viewed window (never the one still on screen).
+                if (sessionId) sync.onSessionHidden(sessionId);
             }
             claimedView.current = false;
         };
