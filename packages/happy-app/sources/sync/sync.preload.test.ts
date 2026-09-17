@@ -279,6 +279,15 @@ describe('chat preload sync integration', () => {
         expect(mocks.state.sessionMessages.b).toBeUndefined();
     });
 
+    it('does not retry a chat the server says is gone', async () => {
+        mocks.request.mockResolvedValueOnce({ ok: false, status: 404 }).mockResolvedValue(response([message()]));
+        engine.onSessionVisible('a');
+        await engine.getMessagesSync('a').awaitQueue();
+        expect(mocks.request).toHaveBeenCalledOnce();
+        expect(engine.sessionLastSeq.has('a')).toBe(false);
+        expect(mocks.applyMessagesLoaded).not.toHaveBeenCalled();
+    });
+
     it('releases chats that fell out of the recently viewed window and reloads them afresh', async () => {
         mocks.state.sessions.c = { id: 'c', permissionMode: 'auto', metadata: {} };
         mocks.state.sessions.d = { id: 'd', permissionMode: 'auto', metadata: {} };
