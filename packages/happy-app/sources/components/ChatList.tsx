@@ -669,6 +669,26 @@ const ChatListInternal = React.memo((props: {
         updateHeaderBackdropVisibility();
     }, [updateHeaderBackdropVisibility]);
 
+    const handleLayout = useCallback((event: { nativeEvent: { layout: { height: number } } }) => {
+        scrollMetricsRef.current.viewportHeight = event.nativeEvent.layout.height;
+        fillOlderRef.current();
+        updateHeaderBackdropVisibility();
+    }, [updateHeaderBackdropVisibility]);
+
+    // Stable prop identities: FlashList diffs its props on every render, and a
+    // fresh style object or element here is a change on each of them.
+    // paddingTop, not paddingBottom: the content container is inside the
+    // inverted transform, so its top edge is the bottom of the screen. The
+    // measured dock inset lets the newest message scroll above the floating
+    // composer instead of stopping underneath it.
+    const contentContainerStyle = React.useMemo(
+        () => ({ paddingTop: 8 + (props.bottomContentInset ?? 0) }),
+        [props.bottomContentInset],
+    );
+    // Swapped: the list's header sits at item 0, which an inverted list draws
+    // at the bottom of the screen.
+    const listHeader = React.useMemo(() => <NewerEnd sessionId={props.sessionId} />, [props.sessionId]);
+
     // Nothing here places the list on open. Offset 0 is both where a scroll
     // view rests by default and where the newest message is, so an inverted
     // list opens on the newest message with no scroll at all — which is the
@@ -812,6 +832,16 @@ const ChatListInternal = React.memo((props: {
     const olderStatus = olderBlocked === 'error' && props.hasMoreOlder ? 'error'
         : olderBlocked === 'limit' && props.hasMoreOlder ? 'load-more'
         : props.isLoadingOlder && windowedMessages.length >= messages.length ? 'loading' : 'idle';
+    const listFooter = React.useMemo(() => (
+        <OlderEnd
+            // The store's flag also pulses on background pages the reader
+            // never sees; only a fetch this list waits on shows, and a failure
+            // shows only while it applies.
+            status={olderStatus}
+            onAction={olderStatus === 'load-more' ? loadMoreOlder : retryOlder}
+            topContentInset={props.topContentInset}
+        />
+    ), [olderStatus, loadMoreOlder, retryOlder, props.topContentInset]);
 
     // FlashList lacks React Native Web FlatList's inverted-wheel correction.
     // Keep the mobile coordinate system, correcting only web chat gestures.
@@ -838,36 +868,16 @@ const ChatListInternal = React.memo((props: {
                 maintainVisibleContentPosition={MAINTAIN_VISIBLE_CONTENT_POSITION}
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'none'}
-                // The measured dock inset lets the newest message scroll above
-                // the floating composer instead of stopping underneath it.
-                // paddingTop, not paddingBottom: the content container is
-                // inside the inverted transform, so its top edge is the bottom
-                // of the screen.
-                contentContainerStyle={{ paddingTop: 8 + (props.bottomContentInset ?? 0) }}
+                contentContainerStyle={contentContainerStyle}
                 renderItem={renderItem}
                 viewabilityConfig={SYNTAX_VIEWABILITY}
                 onViewableItemsChanged={syntaxViewport.update}
                 onScroll={handleScroll}
                 scrollEventThrottle={16}
-                onLayout={(event) => {
-                    scrollMetricsRef.current.viewportHeight = event.nativeEvent.layout.height;
-                    fillOlderRef.current();
-                    updateHeaderBackdropVisibility();
-                }}
+                onLayout={handleLayout}
                 onContentSizeChange={handleContentSizeChange}
-                // Swapped: the list's header sits at item 0, which an inverted
-                // list draws at the bottom of the screen.
-                ListHeaderComponent={<NewerEnd sessionId={props.sessionId} />}
-                ListFooterComponent={(
-                    <OlderEnd
-                        // The store's flag also pulses on background pages the
-                        // reader never sees; only a fetch this list waits on
-                        // shows, and a failure shows only while it applies.
-                        status={olderStatus}
-                        onAction={olderStatus === 'load-more' ? loadMoreOlder : retryOlder}
-                        topContentInset={props.topContentInset}
-                    />
-                )}
+                ListHeaderComponent={listHeader}
+                ListFooterComponent={listFooter}
                 onLoad={handleLoad}
             />
             {showScrollButton && (
