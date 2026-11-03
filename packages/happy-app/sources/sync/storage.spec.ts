@@ -16,6 +16,7 @@ vi.mock('react-native-mmkv', () => ({
 }));
 vi.mock('react-native', () => ({ Platform: { OS: 'web', select: (options: any) => options.web ?? options.default } }));
 vi.mock('./sync', () => ({ sync: {} }));
+vi.mock('./apiSocket', () => ({ apiSocket: { emitWithAck: vi.fn() } }));
 vi.mock('@/realtime/RealtimeSession', () => ({ getCurrentRealtimeSessionId: () => null, getVoiceSession: () => null }));
 vi.mock('@/text', () => ({ t: (key: string) => key }));
 vi.mock('@/components/tools/knownTools', () => ({ isMutableTool: () => true }));
