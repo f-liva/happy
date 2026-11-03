@@ -20,6 +20,8 @@ import { useIsTablet } from '@/utils/responsive';
 import { getHarnessName } from '@/utils/harnessCatalog';
 import { requestReview } from '@/utils/requestReview';
 import { HomeListHeader } from './HomeListHeader';
+import { useSessionSearchStore } from './sessionSearchStore';
+import { SessionSearchNoResults } from './SessionSearchInput';
 import { layout } from './layout';
 import { useSessionPressHandlers } from '@/hooks/useNavigateToSession';
 import { SessionActionsAnchor, SessionActionsPopover } from './SessionActionsPopover';
@@ -323,7 +325,8 @@ export function SessionsList({
 } = {}) {
     const styles = stylesheet;
     const safeArea = useSafeAreaInsets();
-    const sourceData = useVisibleSessionListViewData();
+    const searchQuery = useSessionSearchStore((state) => state.query).trim();
+    const sourceData = useVisibleSessionListViewData(searchQuery);
     const hasArchivedSessions = useHasArchivedSessions();
     // Stored under its original `hideInactiveSessions` key — synced settings
     // have no rename migration — but it hides archived sessions only.
@@ -364,7 +367,9 @@ export function SessionsList({
         const groupedRows = sourceData.filter((item) => (
             item.type !== 'header' && item.type !== 'session'
         ));
-        const archiveToggle: SessionListDisplayItem[] = hasArchivedSessions
+        // The toggle cannot bring anything back while a search is filtering,
+        // so it hides with the rest of the chrome.
+        const archiveToggle: SessionListDisplayItem[] = hasArchivedSessions && !searchQuery
             ? [{ type: 'archive-toggle', hidden: hideArchivedSessions }]
             : [];
 
@@ -419,7 +424,7 @@ export function SessionsList({
             item.type !== 'project' && item.type !== 'projects-header'
         ));
         return [...legacyItems, ...hierarchy, ...archiveToggle, ...archivedRows];
-    }, [flatSessionList, hasArchivedSessions, hideArchivedSessions, machines, sourceData]);
+    }, [flatSessionList, hasArchivedSessions, hideArchivedSessions, machines, searchQuery, sourceData]);
 
     // Early return if no data yet
     if (!data) {
@@ -597,6 +602,7 @@ export function SessionsList({
                         maxWidth: layout.maxWidth,
                     }}
                     ListHeaderComponent={HeaderComponent}
+                    ListEmptyComponent={searchQuery ? SessionSearchNoResults : null}
                     automaticallyAdjustsScrollIndicatorInsets={scrollIndicatorTopInset === 0}
                     scrollIndicatorInsets={scrollIndicatorTopInset > 0
                         ? { top: scrollIndicatorTopInset }
