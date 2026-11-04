@@ -283,6 +283,7 @@ export const ru: TranslationStructure = {
         title: 'Начать новую сессию',
         machineOffline: 'Машина недоступна',
         switchMachinesHint: '• Переключите машину, нажав на неё выше',
+        switchAgentsHint: '• Выберите другого агента выше — другой демон на этом компьютере онлайн',
     },
 
     sessionHistory: {

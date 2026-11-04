@@ -298,6 +298,7 @@ export const pt: TranslationStructure = {
         title: 'Iniciar nova sessão',
         machineOffline: 'A máquina está offline',
         switchMachinesHint: '• Troque de máquina clicando na máquina acima',
+        switchAgentsHint: '• Escolha outro agente acima — o outro daemon deste computador está online',
     },
 
     sessionHistory: {
