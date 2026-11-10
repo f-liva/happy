@@ -2,6 +2,7 @@ import { ApiClient, ApiSessionClient } from "@/lib";
 import { MessageQueue2 } from "@/utils/MessageQueue2";
 import { EnhancedMode } from "./loop";
 import { logger } from "@/ui/logger";
+import { claudeSessionTitle } from "./utils/claudeSessionTitle";
 import type { JsRuntime } from "./runClaude";
 import type { SandboxConfig } from "@/persistence";
 
@@ -113,11 +114,19 @@ export class Session {
     onSessionFound = (sessionId: string) => {
         this.sessionId = sessionId;
         
+        // On resume Happy creates a new Happy session: restore the title the Claude session
+        // already had (last custom-title of its transcript), only if this one has none
+        const title = this.client.getMetadata()?.summary?.text ? null : claudeSessionTitle(sessionId, this.path);
+
         // Update metadata with Claude Code session ID
         this.client.updateMetadata((metadata) => ({
             ...metadata,
-            claudeSessionId: sessionId
+            claudeSessionId: sessionId,
+            ...(title && !metadata.summary?.text ? { summary: { text: title, updatedAt: Date.now() } } : {}),
         }));
+        if (title) {
+            logger.debug(`[Session] Title restored from Claude transcript: ${title}`);
+        }
         logger.debug(`[Session] Claude Code session ID ${sessionId} added to metadata`);
         
         // Notify all registered callbacks
